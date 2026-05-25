@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+
+import argparse
+import getpass
+import os
+import shlex
+import subprocess
+import sys
+import tomllib
+
+
+CONFIG_PATH = os.path.expanduser("~/.config/toolbox-constrained/config.toml")
+
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        return {}
+    with open(CONFIG_PATH, "rb") as f:
+        return tomllib.load(f)
+
+
+def resolve_image(toolbox_name):
+    result = subprocess.run(
+        ["podman", "inspect", "--format", "{{.Config.Image}}", toolbox_name],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        sys.exit(f"error: could not find toolbox container '{toolbox_name}'")
+    return result.stdout.strip()
+
+
+def add_selinux_label(mount_spec):
+    parts = mount_spec.split(":")
+    if len(parts) < 2:
+        sys.exit(f"error: invalid mount spec '{mount_spec}', expected HOST:CONTAINER[:opts]")
+
+    parts[0] = os.path.expandvars(os.path.expanduser(parts[0]))
+    parts[1] = os.path.expandvars(os.path.expanduser(parts[1]))
+
+    if len(parts) >= 3:
+        opts = parts[2].split(",")
+        if "z" in opts or "Z" in opts:
+            return ":".join(parts)
+        opts.append("Z")
+        parts[2] = ",".join(opts)
+        return ":".join(parts)
+
+    parts.append("Z")
+    return ":".join(parts)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run a toolbox image in an isolated podman container.",
+    )
+    parser.add_argument("toolbox_name", help="name of an existing toolbox container")
+    parser.add_argument("-v", action="append", default=[], metavar="HOST:CONTAINER[:opts]",
+                        help="bind mount (repeatable)")
+    parser.add_argument("-e", action="append", default=[], metavar="KEY[=VALUE]",
+                        help="set or pass through an environment variable (repeatable)")
+    parser.add_argument("--cap", action="append", default=[], metavar="NAME",
+                        help="enable a capability from the config file (repeatable)")
+    parser.add_argument("--read-only", action="store_true",
+                        help="make the container filesystem read-only")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="print the podman command instead of running it")
+    parser.add_argument("command", nargs="*", default=["bash"],
+                        help="command to run inside the container (default: bash)")
+
+    args = parser.parse_args()
+
+    image = resolve_image(args.toolbox_name)
+    config = load_config()
+    capabilities = config.get("capabilities", {})
+
+    for cap_name in args.cap:
+        if cap_name not in capabilities:
+            available = ", ".join(capabilities) if capabilities else "(none defined)"
+            sys.exit(f"error: unknown capability '{cap_name}'. Available: {available}")
+        cap = capabilities[cap_name]
+        args.v.extend(cap.get("volumes", []))
+        args.e.extend(cap.get("env", []))
+
+    home = os.path.expanduser("~")
+    username = getpass.getuser()
+
+    setup = (
+        f'echo "{username} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/toolbox-constrained'
+        f' && chmod 440 /etc/sudoers.d/toolbox-constrained'
+        f' && exec runuser -u {username} -- env HOME={shlex.quote(home)} {" ".join(shlex.quote(c) for c in args.command)}'
+    )
+
+    cmd = ["podman", "run", "--rm", "-it", "--userns=keep-id", "--user", "root",
+           "-e", f"HOME={home}"]
+
+    if args.read_only:
+        cmd += ["--read-only", "--tmpfs", "/tmp", "--tmpfs", "/run"]
+
+    for mount in args.v:
+        cmd += ["-v", add_selinux_label(mount)]
+
+    for env in args.e:
+        cmd += ["-e", env]
+
+    cmd += [image, "sh", "-c", setup]
+
+    if args.dry_run:
+        print(" ".join(shlex.quote(c) for c in cmd))
+        return
+
+    os.execvp("podman", cmd)
+
+
+if __name__ == "__main__":
+    main()
