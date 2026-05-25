@@ -19,14 +19,19 @@ def load_config():
         return tomllib.load(f)
 
 
-def resolve_image(toolbox_name):
+def commit_toolbox(toolbox_name):
+    image_name = f"toolbox-constrained-{toolbox_name}"
     result = subprocess.run(
-        ["podman", "inspect", "--format", "{{.Config.Image}}", toolbox_name],
+        ["buildah", "commit", "--disable-compression", toolbox_name, image_name],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        sys.exit(f"error: could not find toolbox container '{toolbox_name}'")
-    return result.stdout.strip()
+        sys.exit(f"error: could not commit toolbox container '{toolbox_name}': {result.stderr.strip()}")
+    return image_name
+
+
+def remove_image(image_name):
+    subprocess.run(["podman", "rmi", image_name], capture_output=True)
 
 
 def add_selinux_label(mount_spec):
@@ -73,7 +78,7 @@ def main():
 
     args = parser.parse_args()
 
-    image = resolve_image(args.toolbox_name)
+    image = commit_toolbox(args.toolbox_name)
     config = load_config()
     capabilities = config.get("capabilities", {})
 
@@ -140,7 +145,11 @@ def main():
         print(" ".join(shlex.quote(c) for c in cmd))
         return
 
-    os.execvp("podman", cmd)
+    try:
+        result = subprocess.run(cmd)
+        sys.exit(result.returncode)
+    finally:
+        remove_image(image)
 
 
 if __name__ == "__main__":
