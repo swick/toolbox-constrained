@@ -60,6 +60,8 @@ def main():
                         help="set or pass through an environment variable (repeatable)")
     parser.add_argument("-p", "--path", action="append", default=[], metavar="DIR",
                         help="prepend a directory to PATH inside the container (repeatable)")
+    parser.add_argument("-i", "--init", action="append", default=[], metavar="CMD",
+                        help="run a bash snippet before entering the container (repeatable)")
     parser.add_argument("--cap", action="append", default=[], metavar="NAME",
                         help="enable a capability from the config file (repeatable)")
     parser.add_argument("--read-only", action="store_true",
@@ -76,6 +78,7 @@ def main():
     capabilities = config.get("capabilities", {})
 
     extra_path = list(args.path)
+    init_snippets = list(args.init)
 
     for cap_name in args.cap:
         if cap_name not in capabilities:
@@ -85,6 +88,8 @@ def main():
         args.v.extend(cap.get("volumes", []))
         args.e.extend(cap.get("env", []))
         extra_path.extend(cap.get("path", []))
+        if "init" in cap:
+            init_snippets.append(cap["init"])
 
     home = os.path.expanduser("~")
     username = getpass.getuser()
@@ -94,10 +99,15 @@ def main():
         path_prefix = ":".join(os.path.expandvars(os.path.expanduser(p)) for p in extra_path)
         env_parts.append(f'PATH="{path_prefix}:$PATH"')
 
+    user_cmd = " ".join(shlex.quote(c) for c in args.command)
+    if init_snippets:
+        init_chain = " && ".join(init_snippets)
+        user_cmd = f"{init_chain} && {user_cmd}"
+
     setup = (
         f'echo "{username} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/toolbox-constrained'
         f' && chmod 440 /etc/sudoers.d/toolbox-constrained'
-        f' && exec runuser -u {username} -- env {" ".join(env_parts)} {" ".join(shlex.quote(c) for c in args.command)}'
+        f' && exec runuser -u {username} -- env {" ".join(env_parts)} sh -c {shlex.quote(user_cmd)}'
     )
 
     cmd = ["podman", "run", "--rm", "-it", "--userns=keep-id", "--user", "root",
