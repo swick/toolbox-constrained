@@ -58,6 +58,8 @@ def main():
                         help="bind mount (repeatable)")
     parser.add_argument("-e", action="append", default=[], metavar="KEY[=VALUE]",
                         help="set or pass through an environment variable (repeatable)")
+    parser.add_argument("-p", "--path", action="append", default=[], metavar="DIR",
+                        help="prepend a directory to PATH inside the container (repeatable)")
     parser.add_argument("--cap", action="append", default=[], metavar="NAME",
                         help="enable a capability from the config file (repeatable)")
     parser.add_argument("--read-only", action="store_true",
@@ -73,6 +75,8 @@ def main():
     config = load_config()
     capabilities = config.get("capabilities", {})
 
+    extra_path = list(args.path)
+
     for cap_name in args.cap:
         if cap_name not in capabilities:
             available = ", ".join(capabilities) if capabilities else "(none defined)"
@@ -80,14 +84,20 @@ def main():
         cap = capabilities[cap_name]
         args.v.extend(cap.get("volumes", []))
         args.e.extend(cap.get("env", []))
+        extra_path.extend(cap.get("path", []))
 
     home = os.path.expanduser("~")
     username = getpass.getuser()
 
+    env_parts = [f"HOME={shlex.quote(home)}"]
+    if extra_path:
+        path_prefix = ":".join(os.path.expandvars(os.path.expanduser(p)) for p in extra_path)
+        env_parts.append(f'PATH="{path_prefix}:$PATH"')
+
     setup = (
         f'echo "{username} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/toolbox-constrained'
         f' && chmod 440 /etc/sudoers.d/toolbox-constrained'
-        f' && exec runuser -u {username} -- env HOME={shlex.quote(home)} {" ".join(shlex.quote(c) for c in args.command)}'
+        f' && exec runuser -u {username} -- env {" ".join(env_parts)} {" ".join(shlex.quote(c) for c in args.command)}'
     )
 
     cmd = ["podman", "run", "--rm", "-it", "--userns=keep-id", "--user", "root",

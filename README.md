@@ -41,7 +41,7 @@ toolbox-constrained my-toolbox --cap ssh -v ~/Projects/myapp:/work -e MY_VAR=hel
 
 ## Capabilities
 
-Define reusable groups of volumes and environment variables in `~/.config/toolbox-constrained/config.toml`:
+Define reusable groups of volumes, environment variables, and PATH entries in `~/.config/toolbox-constrained/config.toml`:
 
 ```toml
 [capabilities.ssh]
@@ -53,7 +53,12 @@ volumes = ["~/.gitconfig:~/.gitconfig:ro"]
 [capabilities.wayland]
 env = ["WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"]
 volumes = ["$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:ro"]
+
+[capabilities.rust]
+path = ["~/.cargo/bin"]
 ```
+
+The `path` entries are prepended to the container's `$PATH`. `~` and `$ENV_VARS` are expanded.
 
 See [config.toml.example](config.toml.example) for a starting point.
 
