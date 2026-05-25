@@ -99,15 +99,27 @@ def main():
         path_prefix = ":".join(os.path.expandvars(os.path.expanduser(p)) for p in extra_path)
         env_parts.append(f'PATH="{path_prefix}:$PATH"')
 
-    user_cmd = " ".join(shlex.quote(c) for c in args.command)
+    init_setup = ""
     if init_snippets:
+        rcfile_content = "\\n".join(init_snippets)
+        init_setup = f' && printf {shlex.quote(rcfile_content)} > /tmp/toolbox-constrained-init.sh'
+
+    user_cmd_parts = list(args.command)
+    if init_snippets and user_cmd_parts == ["bash"]:
+        user_cmd_parts = ["bash", "--rcfile", "/tmp/toolbox-constrained-init.sh"]
+    elif init_snippets:
         init_chain = " && ".join(init_snippets)
-        user_cmd = f"{init_chain} && {user_cmd}"
+        user_cmd = f"{init_chain} && exec {' '.join(shlex.quote(c) for c in user_cmd_parts)}"
+        user_cmd_parts = ["sh", "-c", user_cmd]
+        init_setup = ""
+
+    runuser_cmd = f'env {" ".join(env_parts)} {" ".join(shlex.quote(c) for c in user_cmd_parts)}'
 
     setup = (
         f'echo "{username} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/toolbox-constrained'
         f' && chmod 440 /etc/sudoers.d/toolbox-constrained'
-        f' && exec runuser -u {username} -- env {" ".join(env_parts)} sh -c {shlex.quote(user_cmd)}'
+        f'{init_setup}'
+        f' && exec runuser -u {username} -- {runuser_cmd}'
     )
 
     cmd = ["podman", "run", "--rm", "-it", "--userns=keep-id", "--user", "root",
