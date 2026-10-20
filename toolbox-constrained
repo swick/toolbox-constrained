@@ -86,7 +86,10 @@ def main():
             available = ", ".join(capabilities) if capabilities else "(none defined)"
             sys.exit(f"error: unknown capability '{cap_name}'. Available: {available}")
 
-    image = commit_toolbox(args.toolbox_name)
+    if args.dry_run:
+        image = f"toolbox-constrained-{args.toolbox_name}"
+    else:
+        image = commit_toolbox(args.toolbox_name)
 
     extra_path = list(args.path)
     init_snippets = list(args.init)
