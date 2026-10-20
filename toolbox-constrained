@@ -22,7 +22,7 @@ def load_config():
 def commit_toolbox(toolbox_name):
     image_name = f"toolbox-constrained-{toolbox_name}"
     result = subprocess.run(
-        ["buildah", "commit", "--disable-compression", toolbox_name, image_name],
+        ["podman", "container", "commit", toolbox_name, image_name],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
