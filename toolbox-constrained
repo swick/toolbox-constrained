@@ -78,17 +78,20 @@ def main():
 
     args = parser.parse_args()
 
-    image = commit_toolbox(args.toolbox_name)
     config = load_config()
     capabilities = config.get("capabilities", {})
-
-    extra_path = list(args.path)
-    init_snippets = list(args.init)
 
     for cap_name in args.cap:
         if cap_name not in capabilities:
             available = ", ".join(capabilities) if capabilities else "(none defined)"
             sys.exit(f"error: unknown capability '{cap_name}'. Available: {available}")
+
+    image = commit_toolbox(args.toolbox_name)
+
+    extra_path = list(args.path)
+    init_snippets = list(args.init)
+
+    for cap_name in args.cap:
         cap = capabilities[cap_name]
         args.v.extend(cap.get("volumes", []))
         args.e.extend(cap.get("env", []))
